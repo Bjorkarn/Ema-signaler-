@@ -37,7 +37,10 @@ with st.sidebar:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def load(ticker: str) -> pd.DataFrame:
-    return core.add_emas(core.fetch_weekly(ticker))
+    df = core.fetch_weekly(ticker)
+    if df.empty:
+        raise ValueError("Yahoo returnerade ingen data (rate limit eller fel ticker)")
+    return core.add_emas(df)
 
 
 tickers = []
@@ -48,14 +51,17 @@ for line in text.splitlines():
     t, _, n = line.partition(",")
     tickers.append((t.strip(), n.strip()))
 
-rows, data, failed = [], {}, []
+rows, data, failed, errors = [], {}, [], {}
 with st.spinner("Hämtar data..."):
     for t, n in tickers:
+        res = None
         try:
             df = load(t)
             res = core.analyze_df(t, n, df, lookback)
-        except Exception:
-            res = None
+            if res is None:
+                errors[t] = "För lite historik (behöver minst 51 veckor)"
+        except Exception as exc:
+            errors[t] = f"{type(exc).__name__}: {exc}"
         if res is None:
             failed.append(t)
         else:
@@ -63,7 +69,9 @@ with st.spinner("Hämtar data..."):
             data[t] = df
 
 if not rows:
-    st.error("Ingen data kunde hämtas.")
+    st.error("Ingen data kunde hämtas. Felen nedan visar varför:")
+    for t, msg in errors.items():
+        st.code(f"{t}\n{msg}")
     st.stop()
 
 table = pd.DataFrame(rows)
@@ -79,6 +87,9 @@ styled = shown.style.map(
 st.dataframe(styled, use_container_width=True, hide_index=True)
 if failed:
     st.warning("Kunde inte hämta/analysera: " + ", ".join(failed))
+    with st.expander("Visa felorsaker"):
+        for t in failed:
+            st.code(f"{t}\n{errors.get(t, '')}")
 
 # ------------------------------ Detalj ------------------------------
 st.subheader("Detalj")
